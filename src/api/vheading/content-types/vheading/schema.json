@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "vheadings",
+  "info": {
+    "singularName": "vheading",
+    "pluralName": "vheadings",
+    "displayName": "Vheading",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "string"
+    },
+    "title2": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "string"
+    }
+  }
+}
