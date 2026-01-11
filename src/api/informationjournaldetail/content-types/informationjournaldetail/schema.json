@@ -1,10 +1,10 @@
 {
   "kind": "collectionType",
-  "collectionName": "cyber_laws",
+  "collectionName": "informationjournaldetails",
   "info": {
-    "singularName": "cyber-law",
-    "pluralName": "cyber-laws",
-    "displayName": "Jurnal",
+    "singularName": "informationjournaldetail",
+    "pluralName": "informationjournaldetails",
+    "displayName": "informationjournaldetail",
     "description": ""
   },
   "options": {
@@ -30,25 +30,47 @@
           "localized": true
         }
       },
-      "type": "customField",
-      "options": {
-        "output": "HTML",
-        "preset": "rich"
-      },
-      "customField": "plugin::ckeditor.CKEditor"
+      "type": "text"
     },
-    "image": {
+    "pdf": {
       "type": "media",
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "allowedTypes": [
-        "images"
+        "images",
+        "files",
+        "videos",
+        "audios"
       ],
       "pluginOptions": {
         "i18n": {
-          "localized": false
+          "localized": true
         }
       }
+    },
+    "image": {
+      "type": "media",
+      "multiple": true,
+      "required": false,
+      "allowedTypes": [
+        "images",
+        "files",
+        "videos",
+        "audios"
+      ],
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "date": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "date"
     },
     "slug": {
       "pluginOptions": {
@@ -59,26 +81,13 @@
       "type": "uid",
       "targetField": "title"
     },
-    "name_Mcit": {
+    "price": {
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "string"
-    },
-    "pdf": {
-      "type": "media",
-      "multiple": false,
-      "required": false,
-      "allowedTypes": [
-        "files"
-      ],
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      }
+      "type": "decimal"
     }
   }
 }

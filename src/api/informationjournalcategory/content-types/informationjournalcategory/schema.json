@@ -1,10 +1,10 @@
 {
   "kind": "collectionType",
-  "collectionName": "cyber_law_headings",
+  "collectionName": "informationjournalcategories",
   "info": {
-    "singularName": "cyber-law-heading",
-    "pluralName": "cyber-law-headings",
-    "displayName": "Jurnal heading",
+    "singularName": "informationjournalcategory",
+    "pluralName": "informationjournalcategories",
+    "displayName": "informationjournalcategory",
     "description": ""
   },
   "options": {
@@ -16,7 +16,7 @@
     }
   },
   "attributes": {
-    "title": {
+    "label": {
       "pluginOptions": {
         "i18n": {
           "localized": true
@@ -24,20 +24,7 @@
       },
       "type": "string"
     },
-    "description": {
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "type": "customField",
-      "options": {
-        "output": "HTML",
-        "preset": "rich"
-      },
-      "customField": "plugin::ckeditor.CKEditor"
-    },
-    "duration": {
+    "order": {
       "pluginOptions": {
         "i18n": {
           "localized": true
@@ -45,7 +32,7 @@
       },
       "type": "integer"
     },
-    "HomeUrl": {
+    "description": {
       "pluginOptions": {
         "i18n": {
           "localized": true
@@ -53,13 +40,43 @@
       },
       "type": "string"
     },
-    "CyberLawName": {
+    "slug": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "uid",
+      "targetField": "label"
+    },
+    "ArticleId": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "integer"
+    },
+    "publisheDate": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "date"
+    },
+    "url": {
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
       "type": "string"
+    },
+    "informationjournaldetails": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::informationjournaldetail.informationjournaldetail"
     }
   }
 }
