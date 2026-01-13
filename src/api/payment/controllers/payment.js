@@ -378,6 +378,822 @@ module.exports = createCoreController('api::payment.payment', ({ strapi }) => ({
       };
     }
   },
+// ========== JOURNAL HANDLERS (aliases that work with generic cart system) ==========
+  
+  // Get user's purchased journals
+  async myJournals(ctx) {
+    try {
+      const user = ctx.state.user;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in to view your journals');
+      }
+
+      console.log('📚 Fetching journals for user:', user.id);
+
+      // Find all successful payments
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { 
+          user: user.id,
+          status: 'SUCCESS'
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (payments.length === 0) {
+        return ctx.body = {
+          success: true,
+          journals: [],
+          message: 'No purchased journals found'
+        };
+      }
+
+      const cartIds = payments
+        .map(p => parseInt(p.order_id))
+        .filter(id => !isNaN(id));
+
+      if (cartIds.length === 0) {
+        return ctx.body = {
+          success: true,
+          journals: [],
+          message: 'No valid orders found'
+        };
+      }
+
+      // Get paid carts with items
+      const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+        where: { 
+          id: { $in: cartIds }
+        },
+        populate: ['items']
+      });
+
+      // Extract unique journals
+      const journalsMap = new Map();
+      
+      for (const cart of paidCarts) {
+        if (!cart.items || !Array.isArray(cart.items)) continue;
+
+        for (const item of cart.items) {
+          const journalId = parseInt(item.itemId);
+          
+          if (!journalId || isNaN(journalId)) continue;
+          if (journalsMap.has(journalId)) continue;
+
+          try {
+            // Try to fetch as journal first, fallback to book
+            let journal = null;
+            
+            try {
+              journal = await strapi.entityService.findOne('api::journal.journal', journalId, {
+                populate: ['image', 'pdf', 'cover']
+              });
+            } catch (e) {
+              // If journal doesn't exist, try book
+              journal = await strapi.entityService.findOne('api::book.book', journalId, {
+                populate: ['image', 'pdf']
+              });
+            }
+
+            if (journal) {
+              // Handle cover image
+              let coverImage = null;
+              if (journal.image) {
+                coverImage = Array.isArray(journal.image) 
+                  ? journal.image[0]?.url 
+                  : journal.image.url;
+              } else if (journal.cover) {
+                coverImage = Array.isArray(journal.cover) 
+                  ? journal.cover[0]?.url 
+                  : journal.cover.url;
+              }
+
+              // Handle PDF
+              let pdfUrl = null;
+              if (journal.pdf) {
+                pdfUrl = Array.isArray(journal.pdf) 
+                  ? journal.pdf[0]?.url 
+                  : journal.pdf.url;
+              }
+
+              journalsMap.set(journalId, {
+                id: journal.id,
+                title: journal.title,
+                author: journal.author || journal.publisher,
+                description: journal.description || journal.abstract,
+                price: journal.price,
+                coverImage: coverImage,
+                pdfUrl: pdfUrl,
+                purchasedAt: cart.createdAt,
+                cartId: cart.id
+              });
+            } else {
+              // Fallback to cart data
+              journalsMap.set(journalId, {
+                id: journalId,
+                title: item.title || 'Untitled',
+                author: item.author || 'Unknown',
+                description: '',
+                price: item.price || 0,
+                coverImage: item.image || null,
+                pdfUrl: null,
+                purchasedAt: cart.createdAt,
+                cartId: cart.id
+              });
+            }
+          } catch (err) {
+            console.error(`Error fetching journal ${journalId}:`, err.message);
+          }
+        }
+      }
+
+      const journals = Array.from(journalsMap.values());
+
+      return ctx.body = {
+        success: true,
+        journals: journals,
+        count: journals.length,
+        user_id: user.id
+      };
+    } catch (error) {
+      console.error('Error fetching journals:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error fetching your journals',
+        error: error.message,
+        journals: []
+      };
+    }
+  },
+
+  // Check journal access
+  async checkJournalAccess(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { journalId } = ctx.params;
+      
+      if (!user) {
+        return ctx.body = {
+          success: false,
+          message: 'You must be logged in',
+          has_access: false
+        };
+      }
+
+      if (!journalId) {
+        return ctx.badRequest('journalId is required');
+      }
+
+      console.log('🔍 JOURNAL ACCESS CHECK');
+      console.log('   User:', user.id);
+      console.log('   Journal:', journalId);
+
+      // Get all successful payments
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { 
+          user: user.id,
+          status: 'SUCCESS'
+        }
+      });
+
+      if (payments.length === 0) {
+        console.log('   ❌ No successful payments found');
+        return ctx.body = {
+          success: true,
+          has_access: false,
+          message: 'No purchases found'
+        };
+      }
+
+      const cartIds = payments
+        .map(p => parseInt(p.order_id))
+        .filter(id => !isNaN(id));
+
+      // Check if any paid cart contains this journal
+      const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+        where: { 
+          id: { $in: cartIds }
+        },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      let foundInCart = null;
+
+      for (const cart of paidCarts) {
+        if (cart.items && Array.isArray(cart.items)) {
+          const found = cart.items.some(item => {
+            const itemId = item.itemId || item.id;
+            return itemId && parseInt(itemId) === parseInt(journalId);
+          });
+
+          if (found) {
+            hasAccess = true;
+            foundInCart = cart.id;
+            console.log(`   ✅ Access granted via Cart #${cart.id}`);
+            break;
+          }
+        }
+      }
+
+      if (!hasAccess) {
+        console.log('   ❌ Access denied - journal not in any paid cart');
+      }
+
+      return ctx.body = {
+        success: true,
+        has_access: hasAccess,
+        cart_id: foundInCart
+      };
+    } catch (error) {
+      console.error('❌ Error checking journal access:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error checking journal access',
+        error: error.message,
+        has_access: false
+      };
+    }
+  },
+  // ========== ARTICLE HANDLERS ==========
+  
+  // Get user's purchased articles
+  async myArticles(ctx) {
+    try {
+      const user = ctx.state.user;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in to view your articles');
+      }
+
+      console.log('📰 Fetching articles for user:', user.id);
+
+      // Find all successful payments
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { 
+          user: user.id,
+          status: 'SUCCESS'
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (payments.length === 0) {
+        return ctx.body = {
+          success: true,
+          articles: [],
+          message: 'No purchased articles found'
+        };
+      }
+
+      const cartIds = payments
+        .map(p => parseInt(p.order_id))
+        .filter(id => !isNaN(id));
+
+      if (cartIds.length === 0) {
+        return ctx.body = {
+          success: true,
+          articles: [],
+          message: 'No valid orders found'
+        };
+      }
+
+      // Get paid carts with items
+      const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+        where: { 
+          id: { $in: cartIds }
+        },
+        populate: ['items']
+      });
+
+      // Extract unique articles
+      const articlesMap = new Map();
+      
+      for (const cart of paidCarts) {
+        if (!cart.items || !Array.isArray(cart.items)) continue;
+
+        for (const item of cart.items) {
+          const articleId = parseInt(item.itemId);
+          
+          if (!articleId || isNaN(articleId)) continue;
+          if (articlesMap.has(articleId)) continue;
+
+          try {
+            // Try to fetch as article first, then journal, then book
+            let article = null;
+            
+            try {
+              article = await strapi.entityService.findOne('api::article.article', articleId, {
+                populate: ['image', 'pdf', 'cover']
+              });
+            } catch (e) {
+              try {
+                article = await strapi.entityService.findOne('api::journal.journal', articleId, {
+                  populate: ['image', 'pdf', 'cover']
+                });
+              } catch (e2) {
+                article = await strapi.entityService.findOne('api::book.book', articleId, {
+                  populate: ['image', 'pdf']
+                });
+              }
+            }
+
+            if (article) {
+              // Handle cover image
+              let coverImage = null;
+              if (article.image) {
+                coverImage = Array.isArray(article.image) 
+                  ? article.image[0]?.url 
+                  : article.image.url;
+              } else if (article.cover) {
+                coverImage = Array.isArray(article.cover) 
+                  ? article.cover[0]?.url 
+                  : article.cover.url;
+              }
+
+              // Handle PDF
+              let pdfUrl = null;
+              if (article.pdf) {
+                pdfUrl = Array.isArray(article.pdf) 
+                  ? article.pdf[0]?.url 
+                  : article.pdf.url;
+              }
+
+              articlesMap.set(articleId, {
+                id: article.id,
+                title: article.title,
+                author: article.author || article.publisher,
+                description: article.description || article.abstract || article.summary,
+                price: article.price,
+                coverImage: coverImage,
+                pdfUrl: pdfUrl,
+                // Article-specific fields
+                doi: article.doi,
+                publishedDate: article.publishedDate || article.publication_date,
+                journal: article.journal,
+                volume: article.volume,
+                issue: article.issue,
+                pages: article.pages,
+                purchasedAt: cart.createdAt,
+                cartId: cart.id
+              });
+            } else {
+              // Fallback to cart data
+              articlesMap.set(articleId, {
+                id: articleId,
+                title: item.title || 'Untitled',
+                author: item.author || 'Unknown',
+                description: '',
+                price: item.price || 0,
+                coverImage: item.image || null,
+                pdfUrl: null,
+                purchasedAt: cart.createdAt,
+                cartId: cart.id
+              });
+            }
+          } catch (err) {
+            console.error(`Error fetching article ${articleId}:`, err.message);
+          }
+        }
+      }
+
+      const articles = Array.from(articlesMap.values());
+
+      return ctx.body = {
+        success: true,
+        articles: articles,
+        count: articles.length,
+        user_id: user.id
+      };
+    } catch (error) {
+      console.error('Error fetching articles:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error fetching your articles',
+        error: error.message,
+        articles: []
+      };
+    }
+  },
+
+  // Check article access
+  async checkArticleAccess(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { articleId } = ctx.params;
+      
+      if (!user) {
+        return ctx.body = {
+          success: false,
+          message: 'You must be logged in',
+          has_access: false
+        };
+      }
+
+      if (!articleId) {
+        return ctx.badRequest('articleId is required');
+      }
+
+      console.log('🔍 ARTICLE ACCESS CHECK');
+      console.log('   User:', user.id);
+      console.log('   Article:', articleId);
+
+      // Get all successful payments
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { 
+          user: user.id,
+          status: 'SUCCESS'
+        }
+      });
+
+      if (payments.length === 0) {
+        console.log('   ❌ No successful payments found');
+        return ctx.body = {
+          success: true,
+          has_access: false,
+          message: 'No purchases found'
+        };
+      }
+
+      const cartIds = payments
+        .map(p => parseInt(p.order_id))
+        .filter(id => !isNaN(id));
+
+      // Check if any paid cart contains this article
+      const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+        where: { 
+          id: { $in: cartIds }
+        },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      let foundInCart = null;
+
+      for (const cart of paidCarts) {
+        if (cart.items && Array.isArray(cart.items)) {
+          const found = cart.items.some(item => {
+            const itemId = item.itemId || item.id;
+            return itemId && parseInt(itemId) === parseInt(articleId);
+          });
+
+          if (found) {
+            hasAccess = true;
+            foundInCart = cart.id;
+            console.log(`   ✅ Access granted via Cart #${cart.id}`);
+            break;
+          }
+        }
+      }
+
+      if (!hasAccess) {
+        console.log('   ❌ Access denied - article not in any paid cart');
+      }
+
+      return ctx.body = {
+        success: true,
+        has_access: hasAccess,
+        cart_id: foundInCart
+      };
+    } catch (error) {
+      console.error('❌ Error checking article access:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error checking article access',
+        error: error.message,
+        has_access: false
+      };
+    }
+  },
+
+  // Get article with PDF
+  async getArticleWithPDF(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { articleId } = ctx.params;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in');
+      }
+
+      // Check access
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { user: user.id, status: 'SUCCESS' }
+      });
+
+      const cartIds = payments.map(p => parseInt(p.order_id)).filter(Boolean);
+      
+      const carts = await strapi.db.query('api::cart.cart').findMany({
+        where: { id: { $in: cartIds } },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      for (const cart of carts) {
+        if (cart.items?.some(item => parseInt(item.itemId) === parseInt(articleId))) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
+        return ctx.forbidden('You do not have access to this article');
+      }
+
+      // Try to get as article first, fallback to journal/book
+      let article = null;
+      try {
+        article = await strapi.entityService.findOne('api::article.article', parseInt(articleId), {
+          populate: ['image', 'pdf', 'cover']
+        });
+      } catch (e) {
+        try {
+          article = await strapi.entityService.findOne('api::journal.journal', parseInt(articleId), {
+            populate: ['image', 'pdf', 'cover']
+          });
+        } catch (e2) {
+          article = await strapi.entityService.findOne('api::book.book', parseInt(articleId), {
+            populate: ['image', 'pdf']
+          });
+        }
+      }
+
+      if (!article) {
+        return ctx.notFound('Article not found');
+      }
+
+      // Handle image
+      let coverImage = null;
+      if (article.image) {
+        coverImage = Array.isArray(article.image) ? article.image[0]?.url : article.image.url;
+      } else if (article.cover) {
+        coverImage = Array.isArray(article.cover) ? article.cover[0]?.url : article.cover.url;
+      }
+
+      // Handle PDF
+      let pdfUrl = null;
+      if (article.pdf) {
+        pdfUrl = Array.isArray(article.pdf) ? article.pdf[0]?.url : article.pdf.url;
+      }
+
+      return ctx.body = {
+        success: true,
+        article: {
+          id: article.id,
+          title: article.title,
+          author: article.author || article.publisher,
+          description: article.description || article.abstract || article.summary,
+          coverImage: coverImage,
+          pdfUrl: pdfUrl,
+          doi: article.doi,
+          publishedDate: article.publishedDate || article.publication_date,
+          journal: article.journal,
+          volume: article.volume,
+          issue: article.issue,
+          pages: article.pages
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching article:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error fetching article',
+        error: error.message
+      };
+    }
+  },
+
+  // Download article PDF
+  async downloadArticle(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { articleId } = ctx.params;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in');
+      }
+
+      // Verify access
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { user: user.id, status: 'SUCCESS' }
+      });
+
+      const cartIds = payments.map(p => parseInt(p.order_id)).filter(Boolean);
+      
+      const carts = await strapi.db.query('api::cart.cart').findMany({
+        where: { id: { $in: cartIds } },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      for (const cart of carts) {
+        if (cart.items?.some(item => parseInt(item.itemId) === parseInt(articleId))) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
+        return ctx.forbidden('Access denied');
+      }
+
+      // Get article PDF
+      let article = null;
+      try {
+        article = await strapi.entityService.findOne('api::article.article', parseInt(articleId), {
+          populate: ['pdf']
+        });
+      } catch (e) {
+        try {
+          article = await strapi.entityService.findOne('api::journal.journal', parseInt(articleId), {
+            populate: ['pdf']
+          });
+        } catch (e2) {
+          article = await strapi.entityService.findOne('api::book.book', parseInt(articleId), {
+            populate: ['pdf']
+          });
+        }
+      }
+
+      if (!article || !article.pdf) {
+        return ctx.notFound('PDF not found');
+      }
+
+      // Handle PDF URL
+      let pdfUrl = null;
+      if (Array.isArray(article.pdf)) {
+        pdfUrl = article.pdf[0]?.url || null;
+      } else {
+        pdfUrl = article.pdf.url || null;
+      }
+
+      if (!pdfUrl) {
+        return ctx.notFound('PDF URL not found');
+      }
+
+      return ctx.redirect(pdfUrl);
+    } catch (error) {
+      console.error('Error downloading article:', error);
+      return ctx.internalServerError('Download failed');
+    }
+  },
+
+
+
+  // Get journal with PDF
+  async getJournalWithPDF(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { journalId } = ctx.params;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in');
+      }
+
+      // Check access
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { user: user.id, status: 'SUCCESS' }
+      });
+
+      const cartIds = payments.map(p => parseInt(p.order_id)).filter(Boolean);
+      
+      const carts = await strapi.db.query('api::cart.cart').findMany({
+        where: { id: { $in: cartIds } },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      for (const cart of carts) {
+        if (cart.items?.some(item => parseInt(item.itemId) === parseInt(journalId))) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
+        return ctx.forbidden('You do not have access to this journal');
+      }
+
+      // Try to get as journal first, fallback to book
+      let journal = null;
+      try {
+        journal = await strapi.entityService.findOne('api::journal.journal', parseInt(journalId), {
+          populate: ['image', 'pdf', 'cover']
+        });
+      } catch (e) {
+        journal = await strapi.entityService.findOne('api::book.book', parseInt(journalId), {
+          populate: ['image', 'pdf']
+        });
+      }
+
+      if (!journal) {
+        return ctx.notFound('Journal not found');
+      }
+
+      // Handle image
+      let coverImage = null;
+      if (journal.image) {
+        coverImage = Array.isArray(journal.image) ? journal.image[0]?.url : journal.image.url;
+      } else if (journal.cover) {
+        coverImage = Array.isArray(journal.cover) ? journal.cover[0]?.url : journal.cover.url;
+      }
+
+      // Handle PDF
+      let pdfUrl = null;
+      if (journal.pdf) {
+        pdfUrl = Array.isArray(journal.pdf) ? journal.pdf[0]?.url : journal.pdf.url;
+      }
+
+      return ctx.body = {
+        success: true,
+        journal: {
+          id: journal.id,
+          title: journal.title,
+          author: journal.author || journal.publisher,
+          description: journal.description || journal.abstract,
+          coverImage: coverImage,
+          pdfUrl: pdfUrl
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching journal:', error);
+      return ctx.body = {
+        success: false,
+        message: 'Error fetching journal',
+        error: error.message
+      };
+    }
+  },
+
+  // Download journal PDF
+  async downloadJournal(ctx) {
+    try {
+      const user = ctx.state.user;
+      const { journalId } = ctx.params;
+      
+      if (!user) {
+        return ctx.unauthorized('You must be logged in');
+      }
+
+      // Verify access
+      const payments = await strapi.db.query('api::payment.payment').findMany({
+        where: { user: user.id, status: 'SUCCESS' }
+      });
+
+      const cartIds = payments.map(p => parseInt(p.order_id)).filter(Boolean);
+      
+      const carts = await strapi.db.query('api::cart.cart').findMany({
+        where: { id: { $in: cartIds } },
+        populate: ['items']
+      });
+
+      let hasAccess = false;
+      for (const cart of carts) {
+        if (cart.items?.some(item => parseInt(item.itemId) === parseInt(journalId))) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
+        return ctx.forbidden('Access denied');
+      }
+
+      // Get journal PDF
+      let journal = null;
+      try {
+        journal = await strapi.entityService.findOne('api::journal.journal', parseInt(journalId), {
+          populate: ['pdf']
+        });
+      } catch (e) {
+        journal = await strapi.entityService.findOne('api::book.book', parseInt(journalId), {
+          populate: ['pdf']
+        });
+      }
+
+      if (!journal || !journal.pdf) {
+        return ctx.notFound('PDF not found');
+      }
+
+      // Handle PDF URL
+      let pdfUrl = null;
+      if (Array.isArray(journal.pdf)) {
+        pdfUrl = journal.pdf[0]?.url || null;
+      } else {
+        pdfUrl = journal.pdf.url || null;
+      }
+
+      if (!pdfUrl) {
+        return ctx.notFound('PDF URL not found');
+      }
+
+      return ctx.redirect(pdfUrl);
+    } catch (error) {
+      console.error('Error downloading journal:', error);
+      return ctx.internalServerError('Download failed');
+    }
+  },
+
+
 
   // Get user's payments (only successful ones)
   async myPayments(ctx) {
@@ -738,13 +1554,18 @@ async downloadBook(ctx) {
 
   // Check if user has access to a specific book
  // Check if user has access to a specific book
+// Check if user has access to a specific book
 async checkBookAccess(ctx) {
   try {
     const user = ctx.state.user;
-    const { bookId } = ctx.params; // Changed from ctx.query to ctx.params
+    const { bookId } = ctx.params; // This is correct for route param
     
     if (!user) {
-      return ctx.unauthorized('You must be logged in');
+      return ctx.body = {
+        success: false,
+        message: 'You must be logged in',
+        has_access: false
+      };
     }
 
     if (!bookId) {
@@ -755,18 +1576,40 @@ async checkBookAccess(ctx) {
     console.log('   User:', user.id);
     console.log('   Book:', bookId);
 
-    // Check if user has any paid cart containing this book
+    // Get all successful payments for this user
+    const payments = await strapi.db.query('api::payment.payment').findMany({
+      where: { 
+        user: user.id,
+        status: 'SUCCESS'
+      }
+    });
+
+    if (payments.length === 0) {
+      console.log('   ❌ No successful payments found');
+      return ctx.body = {
+        success: true,
+        has_access: false,
+        message: 'No purchases found'
+      };
+    }
+
+    // Get cart IDs from payments
+    const cartIds = payments
+      .map(p => parseInt(p.order_id))
+      .filter(id => !isNaN(id));
+
+    console.log(`   Found ${cartIds.length} paid carts`);
+
+    // Check if any paid cart contains this book
     const paidCarts = await strapi.db.query('api::cart.cart').findMany({
       where: { 
-        users_permissions_user: user.id,
-        status: 'paid'
+        id: { $in: cartIds }
       },
       populate: ['items']
     });
 
-    console.log(`   Found ${paidCarts.length} paid carts`);
-
     let hasAccess = false;
+    let foundInCart = null;
 
     for (const cart of paidCarts) {
       if (cart.items && Array.isArray(cart.items)) {
@@ -777,6 +1620,7 @@ async checkBookAccess(ctx) {
 
         if (found) {
           hasAccess = true;
+          foundInCart = cart.id;
           console.log(`   ✅ Access granted via Cart #${cart.id}`);
           break;
         }
@@ -787,13 +1631,14 @@ async checkBookAccess(ctx) {
       console.log('   ❌ Access denied - book not in any paid cart');
     }
 
-    ctx.body = {
+    return ctx.body = {
       success: true,
-      has_access: hasAccess
+      has_access: hasAccess,
+      cart_id: foundInCart
     };
   } catch (error) {
     console.error('❌ Error checking book access:', error);
-    ctx.body = {
+    return ctx.body = {
       success: false,
       message: 'Error checking book access',
       error: error.message,
@@ -801,6 +1646,7 @@ async checkBookAccess(ctx) {
     };
   }
 },
+
 
   // Check payment status for a cart
   async createPaymentStatus(ctx) {

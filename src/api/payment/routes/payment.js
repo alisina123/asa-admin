@@ -42,7 +42,9 @@ module.exports = {
       },
     },
     
-    // Get user's purchased books (MAIN ENDPOINT)
+    // ========== BOOKS ENDPOINTS ==========
+    
+    // Get user's purchased books
     {
       method: 'GET',
       path: '/payments/my-books',
@@ -56,7 +58,7 @@ module.exports = {
     // Check if user has access to specific book
     {
       method: 'GET',
-      path: '/payments/check-access/:bookId',
+      path: '/payments/check-access/book/:bookId',
       handler: 'payment.checkBookAccess',
       config: {
         policies: [],
@@ -64,7 +66,7 @@ module.exports = {
       },
     },
     
-    // Get book with PDF (if user has access) - ADD THIS METHOD TO CONTROLLER
+    // Get book with PDF (if user has access)
     {
       method: 'GET',
       path: '/payments/book/:bookId',
@@ -75,7 +77,7 @@ module.exports = {
       },
     },
     
-    // Download book PDF (secure) - ADD THIS METHOD TO CONTROLLER
+    // Download book PDF (secure)
     {
       method: 'GET',
       path: '/payments/download-book/:bookId',
@@ -85,6 +87,54 @@ module.exports = {
         middlewares: [],
       },
     },
+    
+    // ========== JOURNALS ENDPOINTS ==========
+    
+    // Get user's purchased journals
+    {
+      method: 'GET',
+      path: '/payments/my-journals',
+      handler: 'payment.myJournals',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Check if user has access to specific journal
+    {
+      method: 'GET',
+      path: '/payments/check-access/journal/:journalId',
+      handler: 'payment.checkJournalAccess',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Get journal with PDF
+    {
+      method: 'GET',
+      path: '/payments/journal/:journalId',
+      handler: 'payment.getJournalWithPDF',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Download journal PDF
+    {
+      method: 'GET',
+      path: '/payments/download-journal/:journalId',
+      handler: 'payment.downloadJournal',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // ========== UTILITY ENDPOINTS ==========
     
     // Check payment status for cart
     {
@@ -96,12 +146,63 @@ module.exports = {
         middlewares: [],
       },
     },
+    // Get user's purchased articles
+    {
+      method: 'GET',
+      path: '/payments/my-articles',
+      handler: 'payment.myArticles',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Check if user has access to specific article
+    {
+      method: 'GET',
+      path: '/payments/check-access/article/:articleId',
+      handler: 'payment.checkArticleAccess',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Get article with PDF
+    {
+      method: 'GET',
+      path: '/payments/article/:articleId',
+      handler: 'payment.getArticleWithPDF',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Download article PDF
+    {
+      method: 'GET',
+      path: '/payments/download-article/:articleId',
+      handler: 'payment.downloadArticle',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
     
     // Test endpoints (remove in production)
     {
       method: 'POST',
       path: '/payments/test-insert',
       handler: 'payment.testInsert',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/payments/test-my-books',
+      handler: 'payment.testMyBooks',
       config: {
         auth: false,
       },
