@@ -865,6 +865,531 @@ module.exports = createCoreController('api::payment.payment', ({ strapi }) => ({
     }
   },
 
+   // Get all purchased content (magazine view)
+async myMagazine(ctx) {
+  try {
+    const user = ctx.state.user;
+    
+    if (!user) {
+      return ctx.unauthorized('You must be logged in to view your purchased content');
+    }
+
+    console.log('📰 Fetching purchased content for user:', user.id);
+    console.log('👤 User ID:', user.id, 'Email:', user.email);
+
+    // Find all successful payments for THIS user
+    const payments = await strapi.db.query('api::payment.payment').findMany({
+      where: { 
+        user: user.id,
+        status: 'SUCCESS'
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    console.log('💰 Found payments:', payments.length);
+    console.log('📊 Payments:', payments.map(p => ({
+      id: p.id,
+      order_id: p.order_id,
+      user: p.user?.id,
+      status: p.status
+    })));
+
+    if (payments.length === 0) {
+      console.log('❌ No successful payments found for user');
+      return ctx.body = {
+        success: true,
+        items: [],
+        message: 'No purchased content found'
+      };
+    }
+
+    const cartIds = payments
+      .map(p => parseInt(p.order_id))
+      .filter(id => !isNaN(id));
+
+    console.log('🛒 Cart IDs from payments:', cartIds);
+
+    if (cartIds.length === 0) {
+      console.log('❌ No valid cart IDs found');
+      return ctx.body = {
+        success: true,
+        items: [],
+        message: 'No valid orders found'
+      };
+    }
+
+    // Get paid carts with items
+    const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+      where: { 
+        id: { $in: cartIds }
+      },
+      populate: ['items', 'user']  // Also populate user
+    });
+
+    console.log('🛍️ Found carts:', paidCarts.length);
+    console.log('📦 Carts:', paidCarts.map(cart => ({
+      id: cart.id,
+      userId: cart.user?.id,
+      itemCount: cart.items?.length || 0,
+      items: cart.items?.map(i => ({ itemId: i.itemId, itemType: i.itemType, title: i.title }))
+    })));
+
+    // Verify each cart belongs to the current user
+    const userCarts = paidCarts.filter(cart => {
+      const cartUserId = cart.user?.id || cart.user;
+      return cartUserId === user.id;
+    });
+
+    console.log('✅ User carts after filtering:', userCarts.length);
+    if (userCarts.length < paidCarts.length) {
+      console.log('⚠️ Some carts don\'t belong to current user!');
+    }
+
+    // Extract unique items
+    const itemsMap = new Map();
+    
+    for (const cart of userCarts) {
+      if (!cart.items || !Array.isArray(cart.items)) {
+        console.log(`Cart ${cart.id} has no items`);
+        continue;
+      }
+
+      console.log(`📋 Processing cart ${cart.id} with ${cart.items.length} items`);
+      
+      for (const item of cart.items) {
+        const itemId = parseInt(item.itemId);
+        const itemType = item.itemType || 'article';
+        
+        console.log(`   Item: ${itemId} (${itemType}) - ${item.title}`);
+        
+        if (!itemId || isNaN(itemId)) {
+          console.log('   ⚠️ Invalid item ID, skipping');
+          continue;
+        }
+        
+        // Create unique key using both id and type
+        const uniqueKey = `${itemType}_${itemId}`;
+        if (itemsMap.has(uniqueKey)) {
+          console.log(`   ⚠️ Duplicate item, skipping`);
+          continue;
+        }
+
+        try {
+          let contentItem = null;
+          let contentType = itemType;
+          
+          console.log(`   🔍 Fetching ${contentType} ${itemId}...`);
+          
+          // Fetch based on content type
+          switch (itemType.toLowerCase()) {
+            case 'article':
+              contentItem = await strapi.entityService.findOne('api::article.article', itemId, {
+                populate: ['image', 'pdf', 'cover']
+              });
+              break;
+              
+            case 'journal':
+              contentItem = await strapi.entityService.findOne('api::journal.journal', itemId, {
+                populate: ['image', 'pdf', 'cover']
+              });
+              break;
+              
+            case 'book':
+              contentItem = await strapi.entityService.findOne('api::book.book', itemId, {
+                populate: ['image', 'pdf', 'cover', 'author']
+              });
+              break;
+              
+            default:
+              // Try to determine type automatically
+              console.log(`   🔄 Auto-detecting type for ${itemId}...`);
+              try {
+                contentItem = await strapi.entityService.findOne('api::article.article', itemId, {
+                  populate: ['image', 'pdf']
+                });
+                contentType = 'article';
+              } catch (e1) {
+                try {
+                  contentItem = await strapi.entityService.findOne('api::journal.journal', itemId, {
+                    populate: ['image', 'pdf']
+                  });
+                  contentType = 'journal';
+                } catch (e2) {
+                  contentItem = await strapi.entityService.findOne('api::book.book', itemId, {
+                    populate: ['image', 'pdf']
+                  });
+                  contentType = 'book';
+                }
+              }
+          }
+
+          if (contentItem) {
+            console.log(`   ✅ Found ${contentType}: ${contentItem.title || contentItem.name}`);
+            
+            // Handle cover image
+            let coverImage = null;
+            if (contentItem.image) {
+              coverImage = Array.isArray(contentItem.image) 
+                ? contentItem.image[0]?.url 
+                : contentItem.image.url;
+            } else if (contentItem.cover) {
+              coverImage = Array.isArray(contentItem.cover) 
+                ? contentItem.cover[0]?.url 
+                : contentItem.cover.url;
+            }
+
+            // Handle PDF
+            let pdfUrl = null;
+            if (contentItem.pdf) {
+              pdfUrl = Array.isArray(contentItem.pdf) 
+                ? contentItem.pdf[0]?.url 
+                : contentItem.pdf.url;
+            }
+
+            // Type-specific fields
+            let typeSpecificData = {};
+            
+            switch (contentType) {
+              case 'article':
+                typeSpecificData = {
+                  author: contentItem.author,
+                  doi: contentItem.doi,
+                  publishedDate: contentItem.publishedDate,
+                  journal: contentItem.journal,
+                  volume: contentItem.volume,
+                  issue: contentItem.issue,
+                  pages: contentItem.pages
+                };
+                break;
+                
+              case 'journal':
+                typeSpecificData = {
+                  publisher: contentItem.publisher,
+                  issn: contentItem.issn,
+                  publication_date: contentItem.publication_date,
+                  volume: contentItem.volume,
+                  issue: contentItem.issue
+                };
+                break;
+                
+              case 'book':
+                typeSpecificData = {
+                  author: contentItem.author,
+                  isbn: contentItem.isbn,
+                  publisher: contentItem.publisher,
+                  published_date: contentItem.published_date,
+                  pages: contentItem.pages,
+                  edition: contentItem.edition
+                };
+                break;
+            }
+
+            itemsMap.set(uniqueKey, {
+              id: contentItem.id,
+              type: contentType,
+              title: contentItem.title || contentItem.name,
+              description: contentItem.description || contentItem.abstract || contentItem.summary,
+              price: item.price || contentItem.price || 0,
+              purchasedAt: cart.createdAt,
+              cartId: cart.id,
+              itemId: itemId,
+              ...typeSpecificData,
+              coverImage,
+              pdfUrl
+            });
+          } else {
+            console.log(`   ❌ ${contentType} ${itemId} not found, using cart data`);
+            // Fallback to cart data
+            itemsMap.set(uniqueKey, {
+              id: itemId,
+              type: itemType,
+              title: item.title || 'Untitled',
+              author: item.author || 'Unknown',
+              description: '',
+              price: item.price || 0,
+              coverImage: item.image || null,
+              pdfUrl: null,
+              purchasedAt: cart.createdAt,
+              cartId: cart.id,
+              itemId: itemId
+            });
+          }
+        } catch (err) {
+          console.error(`   ❌ Error fetching ${itemType} ${itemId}:`, err.message);
+        }
+      }
+    }
+
+    const items = Array.from(itemsMap.values());
+    console.log('🎉 Final items found:', items.length);
+    console.log('📚 Items:', items.map(i => `${i.type} ${i.id}: ${i.title}`));
+
+    // Group by type for better organization
+    const groupedItems = {
+      articles: items.filter(item => item.type === 'article'),
+      journals: items.filter(item => item.type === 'journal'),
+      books: items.filter(item => item.type === 'book'),
+      all: items
+    };
+
+    return ctx.body = {
+      success: true,
+      items: groupedItems,
+      counts: {
+        total: items.length,
+        articles: groupedItems.articles.length,
+        journals: groupedItems.journals.length,
+        books: groupedItems.books.length
+      },
+      user_id: user.id,
+      debug: {
+        payments_count: payments.length,
+        cart_ids: cartIds,
+        user_carts_count: userCarts.length,
+        all_carts_count: paidCarts.length
+      }
+    };
+  } catch (error) {
+    console.error('❌ Error fetching magazine content:', error);
+    return ctx.body = {
+      success: false,
+      message: 'Error fetching your content',
+      error: error.message,
+      items: {
+        articles: [],
+        journals: [],
+        books: [],
+        all: []
+      }
+    };
+  }
+},
+
+// Check magazine access
+async checkMagazineAccess(ctx) {
+  try {
+    const user = ctx.state.user;
+    const { itemId, itemType } = ctx.params;
+    
+    if (!user) {
+      return ctx.body = {
+        success: false,
+        message: 'You must be logged in',
+        has_access: false
+      };
+    }
+
+    if (!itemId) {
+      return ctx.badRequest('itemId is required');
+    }
+
+    console.log('🔍 MAGAZINE ACCESS CHECK');
+    console.log('   User:', user.id);
+    console.log('   Item ID:', itemId);
+    console.log('   Item Type:', itemType || 'any');
+
+    // Get all successful payments
+    const payments = await strapi.db.query('api::payment.payment').findMany({
+      where: { 
+        user: user.id,
+        status: 'SUCCESS'
+      }
+    });
+
+    if (payments.length === 0) {
+      console.log('   ❌ No successful payments found');
+      return ctx.body = {
+        success: true,
+        has_access: false,
+        message: 'No purchases found'
+      };
+    }
+
+    const cartIds = payments
+      .map(p => parseInt(p.order_id))
+      .filter(id => !isNaN(id));
+
+    // Check if any paid cart contains this item
+    const paidCarts = await strapi.db.query('api::cart.cart').findMany({
+      where: { 
+        id: { $in: cartIds }
+      },
+      populate: ['items']
+    });
+
+    let hasAccess = false;
+    let foundInCart = null;
+    let foundItemType = null;
+
+    for (const cart of paidCarts) {
+      if (cart.items && Array.isArray(cart.items)) {
+        const foundItem = cart.items.find(item => {
+          const currentItemId = item.itemId || item.id;
+          
+          // If itemType is specified, check both id and type
+          if (itemType) {
+            return currentItemId && 
+                   parseInt(currentItemId) === parseInt(itemId) && 
+                   (item.itemType || 'article').toLowerCase() === itemType.toLowerCase();
+          }
+          
+          // Otherwise just check id
+          return currentItemId && parseInt(currentItemId) === parseInt(itemId);
+        });
+
+        if (foundItem) {
+          hasAccess = true;
+          foundInCart = cart.id;
+          foundItemType = foundItem.itemType || 'article';
+          console.log(`   ✅ Access granted via Cart #${cart.id} (Type: ${foundItemType})`);
+          break;
+        }
+      }
+    }
+
+    if (!hasAccess) {
+      console.log('   ❌ Access denied - item not in any paid cart');
+    }
+
+    return ctx.body = {
+      success: true,
+      has_access: hasAccess,
+      cart_id: foundInCart,
+      item_type: foundItemType,
+      item_id: parseInt(itemId)
+    };
+  } catch (error) {
+    console.error('❌ Error checking magazine access:', error);
+    return ctx.body = {
+      success: false,
+      message: 'Error checking access',
+      error: error.message,
+      has_access: false
+    };
+  }
+},
+
+// Get magazine content for viewing
+async getMagazineContent(ctx) {
+  try {
+    const user = ctx.state.user;
+    const { itemId, itemType } = ctx.params;
+    
+    if (!user) {
+      return ctx.unauthorized('You must be logged in');
+    }
+
+    if (!itemId || !itemType) {
+      return ctx.badRequest('itemId and itemType are required');
+    }
+
+    // First check if user has access
+    const accessCheck = await this.checkMagazineAccess(ctx);
+    if (!accessCheck.body.has_access) {
+      return ctx.body = {
+        success: false,
+        message: 'You do not have access to this content'
+      };
+    }
+
+    let contentItem = null;
+    let contentType = itemType.toLowerCase();
+    
+    // Fetch content based on type
+    switch (contentType) {
+      case 'article':
+        contentItem = await strapi.entityService.findOne('api::article.article', parseInt(itemId), {
+          populate: ['image', 'pdf', 'cover', 'journal', 'author']
+        });
+        break;
+        
+      case 'journal':
+        contentItem = await strapi.entityService.findOne('api::journal.journal', parseInt(itemId), {
+          populate: ['image', 'pdf', 'cover', 'publisher']
+        });
+        break;
+        
+      case 'book':
+        contentItem = await strapi.entityService.findOne('api::book.book', parseInt(itemId), {
+          populate: ['image', 'pdf', 'cover', 'author', 'publisher']
+        });
+        break;
+        
+      default:
+        return ctx.badRequest(`Unsupported content type: ${itemType}`);
+    }
+
+    if (!contentItem) {
+      return ctx.notFound('Content not found');
+    }
+
+    // Prepare response data
+    const responseData = {
+      id: contentItem.id,
+      type: contentType,
+      title: contentItem.title || contentItem.name,
+      description: contentItem.description || contentItem.abstract || contentItem.summary || '',
+      content: contentItem.content || '',
+      pdfUrl: contentItem.pdf?.url || null,
+      coverImage: contentItem.image?.url || contentItem.cover?.url || null,
+      createdAt: contentItem.createdAt,
+      updatedAt: contentItem.updatedAt
+    };
+
+    // Add type-specific fields
+    if (contentType === 'article') {
+      Object.assign(responseData, {
+        author: contentItem.author,
+        doi: contentItem.doi,
+        publishedDate: contentItem.publishedDate,
+        journal: contentItem.journal,
+        volume: contentItem.volume,
+        issue: contentItem.issue,
+        pages: contentItem.pages,
+        keywords: contentItem.keywords || [],
+        citations: contentItem.citations || []
+      });
+    } else if (contentType === 'journal') {
+      Object.assign(responseData, {
+        publisher: contentItem.publisher,
+        issn: contentItem.issn,
+        publication_date: contentItem.publication_date,
+        volume: contentItem.volume,
+        issue: contentItem.issue,
+        frequency: contentItem.frequency
+      });
+    } else if (contentType === 'book') {
+      Object.assign(responseData, {
+        author: contentItem.author,
+        isbn: contentItem.isbn,
+        publisher: contentItem.publisher,
+        published_date: contentItem.published_date,
+        pages: contentItem.pages,
+        edition: contentItem.edition,
+        language: contentItem.language,
+        category: contentItem.category
+      });
+    }
+
+    return ctx.body = {
+      success: true,
+      data: responseData,
+      permissions: {
+        can_download: true,
+        can_print: true,
+        can_share: false
+      }
+    };
+    
+  } catch (error) {
+    console.error('Error fetching magazine content:', error);
+    return ctx.body = {
+      success: false,
+      message: 'Error fetching content',
+      error: error.message
+    };
+  }
+},
   // Get article with PDF
   async getArticleWithPDF(ctx) {
     try {
@@ -1038,7 +1563,6 @@ module.exports = createCoreController('api::payment.payment', ({ strapi }) => ({
   },
 
 
-
   // Get journal with PDF
   async getJournalWithPDF(ctx) {
     try {
@@ -1193,8 +1717,6 @@ module.exports = createCoreController('api::payment.payment', ({ strapi }) => ({
     }
   },
 
-
-
   // Get user's payments (only successful ones)
   async myPayments(ctx) {
     try {
@@ -1228,8 +1750,6 @@ module.exports = createCoreController('api::payment.payment', ({ strapi }) => ({
       };
     }
   },
-
-
 
   // Test insert function
   async testInsert(ctx) {

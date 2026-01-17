@@ -133,6 +133,50 @@ module.exports = {
         middlewares: [],
       },
     },
+
+    // Get all purchased content (magazine view)
+    {
+      method: 'GET',
+      path: '/payments/my-magazine',
+      handler: 'payment.myMagazine',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Check access for specific content
+    {
+      method: 'GET',
+      path: '/payments/check-access/:itemId',
+      handler: 'payment.checkMagazineAccess',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Check access with type
+    {
+      method: 'GET',
+      path: '/payments/check-access/:itemType/:itemId',
+      handler: 'payment.checkMagazineAccess',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Get content for viewing
+    {
+      method: 'GET',
+      path: '/payments/magazine-content/:itemType/:itemId',
+      handler: 'payment.getMagazineContent',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
     
     // ========== UTILITY ENDPOINTS ==========
     
