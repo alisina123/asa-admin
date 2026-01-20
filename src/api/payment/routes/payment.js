@@ -30,6 +30,25 @@ module.exports = {
         auth: false,
       },
     },
+    // Add to routes/payment.js
+{
+  method: 'GET',
+  path: '/payments/available-content-types',
+  handler: 'payment.getAvailableContentTypes',
+  config: {
+    policies: [],
+    middlewares: [],
+  },
+},
+{
+  method: 'GET',
+   path: '/payments/deep-debug-cart',
+      handler: 'payment.deepDebugCart',
+  config: {
+    policies: [],
+    middlewares: [],
+  },
+},
     
     // Get all user's payments
     {
@@ -88,6 +107,52 @@ module.exports = {
       },
     },
     
+    // ========== ARTICLES ENDPOINTS ==========
+    
+    // Get user's purchased articles
+    {
+      method: 'GET',
+      path: '/payments/my-articles',
+      handler: 'payment.myArticles',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Check if user has access to specific article
+    {
+      method: 'GET',
+      path: '/payments/check-access/article/:articleId',
+      handler: 'payment.checkArticleAccess',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Get article with PDF
+    {
+      method: 'GET',
+      path: '/payments/article/:articleId',
+      handler: 'payment.getArticleWithPDF',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
+    // Download article PDF
+    {
+      method: 'GET',
+      path: '/payments/download-article/:articleId',
+      handler: 'payment.downloadArticle',
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
+    
     // ========== JOURNALS ENDPOINTS ==========
     
     // Get user's purchased journals
@@ -134,21 +199,23 @@ module.exports = {
       },
     },
 
-    // Get all purchased content (magazine view)
+    // ========== MAGAZINES ENDPOINTS ==========
+    
+    // Get user's purchased magazines
     {
       method: 'GET',
-      path: '/payments/my-magazine',
-      handler: 'payment.myMagazine',
+      path: '/payments/my-magazines',
+      handler: 'payment.myMagazines',
       config: {
         policies: [],
         middlewares: [],
       },
     },
     
-    // Check access for specific content
+    // Check if user has access to specific magazine
     {
       method: 'GET',
-      path: '/payments/check-access/:itemId',
+      path: '/payments/check-access/magazine/:magazineId',
       handler: 'payment.checkMagazineAccess',
       config: {
         policies: [],
@@ -156,22 +223,22 @@ module.exports = {
       },
     },
     
-    // Check access with type
+    // Get magazine with PDF
     {
       method: 'GET',
-      path: '/payments/check-access/:itemType/:itemId',
-      handler: 'payment.checkMagazineAccess',
+      path: '/payments/magazine/:magazineId',
+      handler: 'payment.getMagazineWithPDF',
       config: {
         policies: [],
         middlewares: [],
       },
     },
     
-    // Get content for viewing
+    // Download magazine PDF
     {
       method: 'GET',
-      path: '/payments/magazine-content/:itemType/:itemId',
-      handler: 'payment.getMagazineContent',
+      path: '/payments/download-magazine/:magazineId',
+      handler: 'payment.downloadMagazine',
       config: {
         policies: [],
         middlewares: [],
@@ -190,49 +257,42 @@ module.exports = {
         middlewares: [],
       },
     },
-    // Get user's purchased articles
     {
       method: 'GET',
-      path: '/payments/my-articles',
-      handler: 'payment.myArticles',
+      path: '/payments/admin/reports',
+      handler: 'payment.adminReports',
       config: {
-        policies: [],
-        middlewares: [],
-      },
+            policies: [],
+            middlewares: [],
+          },
     },
-    
-    // Check if user has access to specific article
-    {
-      method: 'GET',
-      path: '/payments/check-access/article/:articleId',
-      handler: 'payment.checkArticleAccess',
-      config: {
-        policies: [],
-        middlewares: [],
-      },
-    },
-    
-    // Get article with PDF
-    {
-      method: 'GET',
-      path: '/payments/article/:articleId',
-      handler: 'payment.getArticleWithPDF',
-      config: {
-        policies: [],
-        middlewares: [],
-      },
-    },
-    
-    // Download article PDF
-    {
-      method: 'GET',
-      path: '/payments/download-article/:articleId',
-      handler: 'payment.downloadArticle',
-      config: {
-        policies: [],
-        middlewares: [],
-      },
-    },
+// {
+//   method: 'GET',
+//   path: '/payments/admin/customer-history',
+//   handler: 'payment.customerPurchaseHistory',
+//   config: {
+//     auth: { strategies: ['jwt'] },
+//     policies: []
+//   }
+// },
+// {
+//   method: 'GET',
+//   path: '/payments/admin/daily-sales',
+//   handler: 'payment.dailySalesReport',
+//   config: {
+//     auth: { strategies: ['jwt'] },
+//     policies: []
+//   }
+// },
+// {
+//   method: 'GET',
+//   path: '/payments/admin/export',
+//   handler: 'payment.exportReportData',
+//   config: {
+//     auth: { strategies: ['jwt'] },
+//     policies: []
+//   }
+// },
     
     // Test endpoints (remove in production)
     {
@@ -251,5 +311,6 @@ module.exports = {
         auth: false,
       },
     },
+    
   ],
 };
