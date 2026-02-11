@@ -2694,7 +2694,7 @@ async myJournals(ctx) {
     }
   },
   // ========== ADMIN REPORTS ==========
-  async adminReports(ctx) {
+ async adminReports(ctx) {
   try {
     const user = ctx.state.user;
     
@@ -2715,7 +2715,16 @@ async myJournals(ctx) {
       endDate, 
       groupBy = 'day', // day, week, month, year
       limit = 100,
-      page = 1
+      page = 1,
+      // New filters
+      search = '',
+      customerEmail = '',
+      minAmount = '',
+      maxAmount = '',
+      itemType = '',
+      sortBy = 'date', // date, amount, customer
+      sortOrder = 'desc', // asc, desc
+      export_format = '' // csv, json
     } = ctx.query;
 
     // Build date filter
@@ -2727,22 +2736,114 @@ async myJournals(ctx) {
       dateFilter.$lte = new Date(endDate);
     }
 
-    // Get ALL successful payments
-    const payments = await strapi.db.query('api::payment.payment').findMany({
-      where: { 
-        status: 'SUCCESS',
-        ...(Object.keys(dateFilter).length > 0 && { createdAt: dateFilter })
-      },
+    // Build payment filter with amount range
+    const paymentFilter = { 
+      status: 'SUCCESS',
+      ...(Object.keys(dateFilter).length > 0 && { createdAt: dateFilter })
+    };
+
+    // Add amount filters
+    if (minAmount) {
+      paymentFilter.amount = { ...paymentFilter.amount, $gte: parseFloat(minAmount) };
+    }
+    if (maxAmount) {
+      paymentFilter.amount = { ...paymentFilter.amount, $lte: parseFloat(maxAmount) };
+    }
+
+    // Add customer email filter
+    if (customerEmail) {
+      paymentFilter.customer_email = { $containsi: customerEmail };
+    }
+
+    // Get ALL successful payments with filters
+    let payments = await strapi.db.query('api::payment.payment').findMany({
+      where: paymentFilter,
       populate: ['user'],
-      orderBy: { createdAt: 'desc' },
-      limit: parseInt(limit),
-      offset: (parseInt(page) - 1) * parseInt(limit)
+      orderBy: { createdAt: 'desc' }
     });
 
-    if (payments.length === 0) {
+    // Apply search filter (searches in customer email and order ID)
+    if (search) {
+      const searchLower = search.toLowerCase();
+      payments = payments.filter(p => {
+        const email = (p.customer_email || p.user?.email || '').toLowerCase();
+        const orderId = (p.order_id || '').toString();
+        const transactionId = (p.transaction_id || '').toLowerCase();
+        return email.includes(searchLower) || 
+               orderId.includes(searchLower) || 
+               transactionId.includes(searchLower);
+      });
+    }
+
+    // Get all cart IDs to filter by item type if needed
+    if (itemType) {
+      const cartIds = payments.map(p => parseInt(p.order_id)).filter(id => !isNaN(id));
+      const cartsWithType = await strapi.db.query('api::cart.cart').findMany({
+        where: { id: { $in: cartIds } }
+      });
+
+      // Filter payments that have carts with the specified item type
+      const validPaymentIds = new Set();
+      for (const cart of cartsWithType) {
+        let items = [];
+        if (Array.isArray(cart.items)) {
+          items = cart.items;
+        } else if (typeof cart.items === 'string') {
+          try {
+            items = JSON.parse(cart.items);
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        const hasItemType = items.some(item => 
+          (item.itemType || '').toLowerCase() === itemType.toLowerCase()
+        );
+        
+        if (hasItemType) {
+          const payment = payments.find(p => parseInt(p.order_id) === cart.id);
+          if (payment) validPaymentIds.add(payment.id);
+        }
+      }
+
+      payments = payments.filter(p => validPaymentIds.has(p.id));
+    }
+
+    // Apply sorting
+    payments = payments.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortBy) {
+        case 'amount':
+          comparison = parseFloat(a.amount || 0) - parseFloat(b.amount || 0);
+          break;
+        case 'customer':
+          const emailA = (a.customer_email || a.user?.email || '').toLowerCase();
+          const emailB = (b.customer_email || b.user?.email || '').toLowerCase();
+          comparison = emailA.localeCompare(emailB);
+          break;
+        case 'date':
+        default:
+          comparison = new Date(a.createdAt) - new Date(b.createdAt);
+          break;
+      }
+      
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    // Store total count before pagination
+    const totalPayments = payments.length;
+
+    // Apply pagination (only if not exporting)
+    if (!export_format) {
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+      payments = payments.slice(offset, offset + parseInt(limit));
+    }
+
+    if (totalPayments === 0) {
       return ctx.body = {
         success: true,
-        message: 'No payments found',
+        message: 'No payments found matching your filters',
         reports: {
           summary: {
             total_payments: 0,
@@ -2761,30 +2862,20 @@ async myJournals(ctx) {
           top_customers: [],
           sales_timeline: [],
           item_type_analysis: {
-            counts: {
-              book: 0,
-              article: 0,
-              journal: 0,
-              magazine: 0,
-              other: 0
-            },
+            counts: { book: 0, article: 0, journal: 0, magazine: 0, other: 0 },
             percentage_of_total: {}
-          },
-          raw_data_summary: {
-            total_payments_analyzed: 0,
-            total_carts_analyzed: 0,
-            total_items_analyzed: 0,
-            time_period: {
-              start_date: startDate || 'Not specified',
-              end_date: endDate || 'Not specified',
-              group_by: groupBy
-            }
           }
+        },
+        filters_applied: {
+          search, customerEmail, minAmount, maxAmount, itemType,
+          startDate: startDate || 'Not specified',
+          endDate: endDate || 'Not specified'
         },
         pagination: {
           current_page: parseInt(page),
           page_size: parseInt(limit),
           total_payments: 0,
+          total_pages: 0,
           has_more: false
         }
       };
@@ -2800,16 +2891,11 @@ async myJournals(ctx) {
 
     // Collect all items from all carts
     const allCartItems = [];
-    const customerMap = new Map(); // user_id -> data
+    const customerMap = new Map();
     const itemTypeCounts = {
-      book: 0,
-      article: 0,
-      journal: 0,
-      magazine: 0,
-      other: 0
+      book: 0, article: 0, journal: 0, magazine: 0, other: 0
     };
-    
-    const itemDetails = new Map(); // itemType + price -> details
+    const itemDetails = new Map();
 
     for (const cart of paidCarts) {
       let items = [];
@@ -2827,14 +2913,12 @@ async myJournals(ctx) {
         }
       }
 
-      // Find payment for this cart
       const payment = payments.find(p => parseInt(p.order_id) === cart.id);
       if (!payment) continue;
 
       const userId = payment.user?.id || 'unknown';
       const userEmail = payment.user?.email || payment.customer_email || 'unknown@example.com';
 
-      // Update customer stats
       if (!customerMap.has(userId)) {
         customerMap.set(userId, {
           user_id: userId,
@@ -2853,19 +2937,19 @@ async myJournals(ctx) {
       customer.total_orders += 1;
       customer.last_purchase = payment.createdAt > customer.last_purchase ? payment.createdAt : customer.last_purchase;
 
-      // Process items in this cart
       for (const item of items) {
         allCartItems.push({
           cart_id: cart.id,
           payment_id: payment.id,
           user_id: userId,
+          user_email: userEmail,
           item_type: item.itemType || 'unknown',
           price: parseFloat(item.price || 0),
           quantity: parseInt(item.quantity || 1),
-          purchase_date: payment.createdAt
+          purchase_date: payment.createdAt,
+          transaction_id: payment.transaction_id || ''
         });
 
-        // Update item type counts
         const itemType = (item.itemType || 'other').toLowerCase();
         if (itemTypeCounts.hasOwnProperty(itemType)) {
           itemTypeCounts[itemType] += (item.quantity || 1);
@@ -2873,14 +2957,12 @@ async myJournals(ctx) {
           itemTypeCounts.other += (item.quantity || 1);
         }
 
-        // Update customer item types
         if (!customer.item_types[itemType]) {
           customer.item_types[itemType] = 0;
         }
         customer.item_types[itemType] += (item.quantity || 1);
         customer.items_purchased += (item.quantity || 1);
 
-        // Track item details for top items
         const itemKey = `${itemType}_${item.price}`;
         if (!itemDetails.has(itemKey)) {
           itemDetails.set(itemKey, {
@@ -2904,7 +2986,6 @@ async myJournals(ctx) {
     const revenueByType = {};
     const totalRevenue = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     
-    // Group by item type for revenue
     for (const [key, detail] of itemDetails) {
       const type = detail.item_type;
       if (!revenueByType[type]) {
@@ -2918,7 +2999,6 @@ async myJournals(ctx) {
       revenueByType[type].items_sold += detail.quantity_sold;
     }
     
-    // Calculate averages
     for (const type in revenueByType) {
       revenueByType[type].revenue = parseFloat(revenueByType[type].revenue.toFixed(2));
       revenueByType[type].average_price = revenueByType[type].items_sold > 0 
@@ -2926,7 +3006,6 @@ async myJournals(ctx) {
         : 0;
     }
 
-    // Get top selling items
     const topItems = Array.from(itemDetails.values())
       .sort((a, b) => b.quantity_sold - a.quantity_sold)
       .slice(0, 10)
@@ -2939,7 +3018,6 @@ async myJournals(ctx) {
         last_sold: item.last_sold
       }));
 
-    // Get top customers
     const topCustomers = Array.from(customerMap.values())
       .sort((a, b) => b.total_spent - a.total_spent)
       .slice(0, 10)
@@ -2967,7 +3045,7 @@ async myJournals(ctx) {
       
       switch (groupBy) {
         case 'day':
-          dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+          dateKey = date.toISOString().split('T')[0];
           break;
         case 'week':
           const weekStart = new Date(date);
@@ -2998,7 +3076,6 @@ async myJournals(ctx) {
       period.total_revenue += parseFloat(payment.amount || 0);
       period.transactions += 1;
       
-      // Find cart for this payment to count items
       const cart = paidCarts.find(c => c.id === parseInt(payment.order_id));
       if (cart && cart.items) {
         let items = [];
@@ -3032,7 +3109,6 @@ async myJournals(ctx) {
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    // Summary statistics
     const totalItemsSold = allCartItems.reduce((sum, item) => sum + item.quantity, 0);
     
     const summary = {
@@ -3050,7 +3126,6 @@ async myJournals(ctx) {
       item_type_breakdown: itemTypeCounts
     };
 
-    // Revenue growth calculation
     let revenueGrowth = '0.00';
     if (timeline.length >= 2) {
       const currentPeriod = timeline[timeline.length - 1];
@@ -3064,7 +3139,6 @@ async myJournals(ctx) {
       }
     }
 
-    // Most active day
     const mostActiveDay = timeline.length > 0
       ? timeline.reduce((max, day) => 
           day.transactions > max.transactions ? day : max,
@@ -3072,12 +3146,11 @@ async myJournals(ctx) {
         )
       : { transactions: 0, date: 'N/A', total_revenue: 0 };
 
-    // Average items per order
     const avgItemsPerOrder = payments.length > 0 
       ? (totalItemsSold / payments.length).toFixed(2)
       : '0.00';
 
-    return ctx.body = {
+    const reportData = {
       success: true,
       reports: {
         summary: {
@@ -3106,30 +3179,43 @@ async myJournals(ctx) {
                 return acc;
               }, {})
             : {}
-        },
-        raw_data_summary: {
-          total_payments_analyzed: payments.length,
-          total_carts_analyzed: paidCarts.length,
-          total_items_analyzed: allCartItems.length,
-          time_period: {
-            start_date: startDate || 'Not specified',
-            end_date: endDate || 'Not specified',
-            group_by: groupBy
-          }
         }
+      },
+      filters_applied: {
+        search: search || 'None',
+        customer_email: customerEmail || 'None',
+        min_amount: minAmount || 'None',
+        max_amount: maxAmount || 'None',
+        item_type: itemType || 'None',
+        start_date: startDate || 'Not specified',
+        end_date: endDate || 'Not specified',
+        group_by: groupBy,
+        sort_by: sortBy,
+        sort_order: sortOrder
       },
       pagination: {
         current_page: parseInt(page),
         page_size: parseInt(limit),
-        total_payments: payments.length,
-        has_more: payments.length === parseInt(limit)
-      },
-      export_formats: [
-        'CSV',
-        'JSON',
-        'PDF (coming soon)'
-      ]
+        total_payments: totalPayments,
+        total_pages: Math.ceil(totalPayments / parseInt(limit)),
+        has_more: (parseInt(page) * parseInt(limit)) < totalPayments
+      }
     };
+
+    // Handle export formats
+    if (export_format === 'csv') {
+      const csv = generateCSVReport(allCartItems, payments, summary);
+      ctx.set('Content-Type', 'text/csv');
+      ctx.set('Content-Disposition', `attachment; filename="sales-report-${new Date().toISOString().split('T')[0]}.csv"`);
+      return ctx.body = csv;
+    } else if (export_format === 'json') {
+      ctx.set('Content-Type', 'application/json');
+      ctx.set('Content-Disposition', `attachment; filename="sales-report-${new Date().toISOString().split('T')[0]}.json"`);
+      return ctx.body = JSON.stringify(reportData, null, 2);
+    }
+
+    return ctx.body = reportData;
+
   } catch (error) {
     console.error('❌ Admin reports error:', error);
     return ctx.body = {
@@ -3139,7 +3225,9 @@ async myJournals(ctx) {
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     };
   }
-}
+},
+
+
 
 
 }));
