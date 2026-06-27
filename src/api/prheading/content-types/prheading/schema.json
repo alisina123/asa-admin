@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "prheadings",
+  "info": {
+    "singularName": "prheading",
+    "pluralName": "prheadings",
+    "displayName": "Prheading",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "title2": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    }
+  }
+}

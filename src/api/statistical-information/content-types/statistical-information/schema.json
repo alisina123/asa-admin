@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "statistical_informations",
+  "info": {
+    "singularName": "statistical-information",
+    "pluralName": "statistical-informations",
+    "displayName": "Statistical Information"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "information": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "customField",
+      "options": {
+        "output": "HTML",
+        "preset": "rich"
+      },
+      "customField": "plugin::ckeditor.CKEditor"
+    }
+  }
+}

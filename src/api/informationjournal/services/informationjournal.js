@@ -1,0 +1,9 @@
+'use strict';
+
+/**
+ * informationjournal service
+ */
+
+const { createCoreService } = require('@strapi/strapi').factories;
+
+module.exports = createCoreService('api::informationjournal.informationjournal');

@@ -1,0 +1,19 @@
+{
+  "kind": "singleType",
+  "collectionName": "visitor_counters",
+  "info": {
+    "singularName": "visitor-counter",
+    "pluralName": "visitor-counters",
+    "displayName": "Visitor Counter"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "count": {
+      "type": "biginteger",
+      "default": "1252"
+    }
+  }
+}

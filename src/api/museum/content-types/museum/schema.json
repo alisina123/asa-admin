@@ -1,0 +1,36 @@
+{
+  "kind": "singleType",
+  "collectionName": "museums",
+  "info": {
+    "singularName": "museum",
+    "pluralName": "museums",
+    "displayName": "Museum"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "pluginOptions": { "i18n": { "localized": true } }
+    },
+    "introduction": {
+      "type": "customField",
+      "options": { "output": "HTML", "preset": "rich" },
+      "customField": "plugin::ckeditor.CKEditor",
+      "pluginOptions": { "i18n": { "localized": true } }
+    },
+    "images": {
+      "type": "media",
+      "multiple": true,
+      "required": false,
+      "allowedTypes": ["images"],
+      "pluginOptions": { "i18n": { "localized": true } }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "kind": "collectionType",
+  "collectionName": "information_authors",
+  "info": {
+    "singularName": "information-author",
+    "pluralName": "information-authors",
+    "displayName": "Information Author",
+    "description": "",
+    "mainField": "title"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "description": {
+      "type": "customField",
+      "options": {
+        "output": "HTML",
+        "preset": "rich"
+      },
+      "customField": "plugin::ckeditor.CKEditor",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "informationjournal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::informationjournal.informationjournal",
+      "inversedBy": "information_authors"
+    }
+  }
+}
