@@ -54,14 +54,6 @@
       },
       "type": "date"
     },
-    "crdate": {
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "type": "string"
-    },
     "location": {
       "pluginOptions": {
         "i18n": {
@@ -100,14 +92,15 @@
       "type": "integer"
     },
     "file": {
+      "type": "media",
+      "multiple": true,
+      "required": false,
       "allowedTypes": [
         "images",
         "files",
         "videos",
         "audios"
       ],
-      "type": "media",
-      "multiple": true,
       "pluginOptions": {
         "i18n": {
           "localized": true

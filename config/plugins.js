@@ -1,8 +1,10 @@
 module.exports = () => ({
   upload: {
     config: {
-      sizeLimit: 1024 * 1024 * 1024,
-    },
+    formLimit: '1024mb',
+    jsonLimit: '1024mb',
+    formidable: { maxFileSize: 1024 * 1024 * 1024 },
+  },
   },
   email: {
     config: {
